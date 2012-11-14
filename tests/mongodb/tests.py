@@ -1,4 +1,5 @@
 from cStringIO import StringIO
+from operator import attrgetter
 from django.core.management import call_command
 from django.db import connection, connections
 from django.db.utils import DatabaseError, IntegrityError
@@ -19,7 +20,19 @@ from django_mongodb_engine.serializer import LazyModelInstance
 from .models import *
 from .utils import *
 
-class MongoDBEngineTests(TestCase):
+class AssertionsMixin(object):
+
+    def assertEqualModels(self, model1, model2, message=None):
+        self.assertEqual(model1.pk, ObjectId(model2.pk), message)
+
+    def assertEqualModelsList(self, model1, model2, message=None):
+        model1_pks = map(attrgetter('pk'), model1)
+        model2_pks = map(ObjectId, map(attrgetter('pk'), model2))
+        model1_pks.sort()
+        model2_pks.sort()
+        self.assertEqualLists(model1_pks, model2_pks)
+
+class MongoDBEngineTests(TestCase, AssertionsMixin):
     """ Tests for mongodb-engine specific features """
 
     def test_mongometa(self):
@@ -29,10 +42,10 @@ class MongoDBEngineTests(TestCase):
         from django_mongodb_engine.query import A
         obj1 = RawModel.objects.create(raw=[{'a' : 1, 'b' : 2}])
         obj2 = RawModel.objects.create(raw=[{'a' : 1, 'b' : 3}])
-        self.assertEqualLists(RawModel.objects.filter(raw=A('a', 1)),
+        self.assertEqualModelsList(RawModel.objects.filter(raw=A('a', 1)),
                               [obj1, obj2])
-        self.assertEqual(RawModel.objects.get(raw=A('b', 2)), obj1)
-        self.assertEqual(RawModel.objects.get(raw=A('b', 3)), obj2)
+        self.assertEqualModels(RawModel.objects.get(raw=A('b', 2)), obj1)
+        self.assertEqualModels(RawModel.objects.get(raw=A('b', 3)), obj2)
 
     def test_lazy_model_instance(self):
         l1 = LazyModelInstance(RawModel, 'some-pk')
@@ -42,7 +55,7 @@ class MongoDBEngineTests(TestCase):
         obj = RawModel.objects.create(raw='foobar')
         l3 = LazyModelInstance(RawModel, obj.id)
         self.assertEqual(l3._wrapped, None)
-        self.assertEqual(obj, l3)
+        self.assertEqualModels(l3, obj)
         self.assertNotEqual(l3._wrapped, None)
 
     def test_lazy_model_instance_in_list(self):
@@ -113,7 +126,7 @@ class MongoDBEngineTests(TestCase):
             call_command('tellsiteid', stdout=stdout, **kwargs)
             self.assertIn(site_id, stdout.getvalue())
 
-class RegressionTests(TestCase):
+class RegressionTests(TestCase, AssertionsMixin):
     @skip("Needs changes in ListField/db_type")
     def test_issue_47(self):
         """ ForeignKeys in subobjects should be ObjectIds, not unicode """
@@ -148,17 +161,17 @@ class RegressionTests(TestCase):
         )
         obj = CustomIDModel2.objects.create(id=41)
         self.assertEqualLists(
-            CustomIDModel2.objects.order_by('id').values('id'),
+            CustomIDModel2.objects.order_by('-id').values('id'),
             [{'id': 42}, {'id': 41}]
         )
-        self.assertEqual(obj, CustomIDModel2.objects.get(id=41))
+        self.assertEqual(CustomIDModel2.objects.get(id=41).pk, obj.pk)
 
     def test_multiple_exclude(self):
         objs = [RawModel.objects.create(raw=i) for i in xrange(1, 6)]
-        self.assertEqual(
-            objs[-1],
+        self.assertEqualModels(
             RawModel.objects.exclude(raw=1).exclude(raw=2) \
-                            .exclude(raw=3).exclude(raw=4).get()
+                            .exclude(raw=3).exclude(raw=4).get(),
+            objs[-1]
         )
         list(RawModel.objects.filter(raw=1).filter(raw=2))
         list(RawModel.objects.filter(raw=1).filter(raw=2).exclude(raw=3))
@@ -212,10 +225,12 @@ class DatabaseOptionTests(TestCase):
             }
         }) as connection:
             for name, value in connection.settings_dict['OPTIONS'].iteritems():
+                if name == 'NETWORK_TIMEOUT':
+                    name = 'net_timeout'
                 name = '_Connection__%s' % name.lower()
                 if name not in connection.connection.__dict__:
                     # slave_okay was moved into BaseObject in PyMongo 2.0
-                    name = name.replace('Connection', 'BaseObject')
+                    name = name.replace('Connection', 'BaseObject')                
                 self.assertEqual(connection.connection.__dict__[name], value)
 
     def test_operation_flags(self):

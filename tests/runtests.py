@@ -30,7 +30,6 @@ def main(short):
         RawModel.objects.all().delete()
         RawModel.objects.create(raw=42)
     ''')
-
     import settings
     import settings.dbindexer
     import settings.slow_tests

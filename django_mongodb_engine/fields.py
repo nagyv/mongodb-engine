@@ -15,6 +15,12 @@ from django_mongodb_engine.utils import make_struct
 
 __all__ = ['LegacyEmbeddedModelField', 'GridFSField', 'GridFSString']
 
+def get_db_prep_save(cls, value, connection):
+    return ObjectId(value)
+
+models.fields.AutoField.get_db_prep_save = get_db_prep_save
+
+
 class LegacyEmbeddedModelField(_EmbeddedModelField):
     """
     Wrapper around djangotoolbox' :class:`EmbeddedModelField` that keeps

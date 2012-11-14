@@ -7,6 +7,17 @@ from models import Author, Article, Tag
 
 from bson.objectid import ObjectId
 
+class AssertionsMixin(object):
+
+    def assertEqualModels(self, model1, model2, message=None):
+        self.assertEqual(model1.pk, ObjectId(model2.pk), message)
+
+    def assertEqualModelsList(self, model1, model2, message=None):
+        model1_pks = map(attrgetter('pk'), model1)
+        model2_pks = map(ObjectId, map(attrgetter('pk'), model2))
+        model1_pks.sort()
+        model2_pks.sort()
+        self.assertEqualLists(model1_pks, model2_pks)
 
 class LookupTests(TestCase):
 
@@ -104,6 +115,7 @@ class LookupTests(TestCase):
     def test_in_bulk(self):
         # in_bulk() takes a list of IDs and returns a dictionary mapping IDs to objects.
         arts = Article.objects.in_bulk([self.a1.id, self.a2.id])
+        # FIXME: currently in_bulk returns ObjectIDs, instead of unicode
         self.assertEqual(arts[self.a1.id], self.a1)
         self.assertEqual(arts[self.a2.id], self.a2)
         self.assertEqual(Article.objects.in_bulk([self.a3.id]), {self.a3.id: self.a3})

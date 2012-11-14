@@ -13,7 +13,19 @@ except ImportError:
 from .models import *
 from .utils import *
 
-class BasicQueryTests(TestCase):
+class AssertionsMixin(object):
+
+    def assertEqualModels(self, model1, model2, message=None):
+        self.assertEqual(model1.pk, ObjectId(model2.pk), message)
+        
+    def assertEqualModelsList(self, model1, model2, message=None):
+        model1_pks = map(attrgetter('pk'), model1)
+        model2_pks = map(ObjectId, map(attrgetter('pk'), model2))
+        model1_pks.sort()
+        model2_pks.sort()
+        self.assertEqualLists(model1_pks, model2_pks)
+
+class BasicQueryTests(TestCase, AssertionsMixin):
     """ Backend-agnostic query tests """
 
     def test_add_and_delete_blog(self):
@@ -32,7 +44,7 @@ class BasicQueryTests(TestCase):
         Blog.objects.create(title="same title")
         Blog.objects.create(title="another title")
         self.assertEqual(Blog.objects.count(), 3)
-        self.assertEqual(Blog.objects.get(pk=blog1.pk), blog1)
+        self.assertEqual(Blog.objects.get(pk=blog1.pk).pk, ObjectId(blog1.pk))
         self.assertEqual(Blog.objects.filter(title="same title").count(), 2)
         self.assertEqual(Blog.objects.filter(title="same title").filter(pk=blog1.pk).count(), 1)
         self.assertEqual(Blog.objects.filter(title__startswith="same").count(), 2)
@@ -54,13 +66,13 @@ class BasicQueryTests(TestCase):
     def test_isnull(self):
         p1 = Post.objects.create(title='a')
         p2 = Post.objects.create(title='b', date_published=datetime.datetime.now())
-        self.assertEqual(Post.objects.get(date_published__isnull=True), p1)
-        self.assertEqual(Post.objects.get(date_published__isnull=False), p2)
+        self.assertEqualModels(Post.objects.get(date_published__isnull=True), p1)
+        self.assertEqualModels(Post.objects.get(date_published__isnull=False), p2)
 
     def test_range(self):
         i1 = IntegerModel.objects.create(integer=3)
         i2 = IntegerModel.objects.create(integer=10)
-        self.assertEqual(IntegerModel.objects.get(integer__range=(2, 4)), i1)
+        self.assertEqualModels(IntegerModel.objects.get(integer__range=(2, 4)), i1)
 
     def test_change_model(self):
         blog1 = Blog.objects.create(title="blog 1")
@@ -95,9 +107,9 @@ class BasicQueryTests(TestCase):
         )
         self.assertEqual(
             DateModel.objects.values_list('time', 'date', 'datelist').get(),
-            (datetime.time(hour=3, minute=5, second=7),
-             datetime.date(year=2042, month=3, day=5),
-             [datetime.date(year=2001, month=1, day=2)])
+            (datetime.datetime(year=1, month=1, day=1, hour=3, minute=5, second=7),
+             datetime.datetime(year=2042, month=3, day=5, hour=0, minute=0, second=0),
+             [datetime.datetime(year=2001, month=1, day=2, hour=0, minute=0, second=0)])
         )
 
     def test_dates_less_and_more_than(self):
@@ -109,9 +121,9 @@ class BasicQueryTests(TestCase):
         entry2 = Post.objects.create(title="entry 2", date_published=before)
         entry3 = Post.objects.create(title="entry 3", date_published=after)
 
-        self.assertEqualLists(Post.objects.filter(date_published=now), [entry1])
-        self.assertEqualLists(Post.objects.filter(date_published__lt=now), [entry3])
-        self.assertEqualLists(Post.objects.filter(date_published__gt=now), [entry2])
+        self.assertEqualModelsList(Post.objects.filter(date_published=now), [entry1])
+        self.assertEqualModelsList(Post.objects.filter(date_published__lt=now), [entry3])
+        self.assertEqualModelsList(Post.objects.filter(date_published__gt=now), [entry2])
 
     def test_year_date(self):
         now = datetime.datetime.now()
@@ -120,8 +132,8 @@ class BasicQueryTests(TestCase):
         entry1 = Post.objects.create(title="entry 1", date_published=now)
         entry2 = Post.objects.create(title="entry 2", date_published=before)
 
-        self.assertEqualLists(Post.objects.filter(date_published__year=now.year), [entry1])
-        self.assertEqualLists(Post.objects.filter(date_published__year=before.year), [entry2])
+        self.assertEqualModelsList(Post.objects.filter(date_published__year=now.year), [entry1])
+        self.assertEqualModelsList(Post.objects.filter(date_published__year=before.year), [entry2])
 
     def test_simple_foreign_keys(self):
         blog1 = Blog.objects.create(title="Blog")
@@ -130,12 +142,12 @@ class BasicQueryTests(TestCase):
         self.assertEqual(Post.objects.count(), 2)
         for entry in Post.objects.all():
             self.assertEqual(
-                blog1,
-                entry.blog
+                ObjectId(blog1.pk),
+                entry.blog.pk
             )
         blog2 = Blog.objects.create(title="Blog")
         Post.objects.create(title="entry 3", blog=blog2)
-        self.assertEqualLists(Post.objects.filter(blog=blog1.pk).order_by('pk'),
+        self.assertEqualModelsList(Post.objects.filter(blog=blog1.pk).order_by('pk'),
                               [entry1, entry2])
         # XXX Uncomment this if the corresponding Django has been fixed
         #entry_without_blog = Post.objects.create(title='x')
@@ -159,13 +171,13 @@ class BasicQueryTests(TestCase):
             ('endswith', '\\', [5]),
             ('iendswith', 'D', [1, 2])
         ]:
-            self.assertEqualLists(
-                [blog for i, blog in enumerate(blogs) if i in objs],
-                Blog.objects.filter(**{'title__%s' % lookup : value}).order_by('pk')
+            self.assertEqualModelsList(
+                Blog.objects.filter(**{'title__%s' % lookup : value}).order_by('pk'),
+                [blog for i, blog in enumerate(blogs) if i in objs]
             )
-            self.assertEqualLists(
-                [blog for i, blog in enumerate(blogs) if i not in objs],
-                Blog.objects.filter(~Q(**{'title__%s' % lookup : value})).order_by('pk')
+            self.assertEqualModelsList(
+                Blog.objects.filter(~Q(**{'title__%s' % lookup : value})).order_by('pk'),
+                [blog for i, blog in enumerate(blogs) if i not in objs]
             )
 
     def test_multiple_regex_matchers(self):
@@ -214,15 +226,15 @@ class BasicQueryTests(TestCase):
             Post.objects.all()[0]
         )
 
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Post.objects.filter(title__startswith='T').exclude(title='Title A'),
             [posts[1]]
         )
-        self.assertEqual(
+        self.assertEqualModels(
             Post.objects.exclude(title='asd asd').exclude(title__startswith='T').get(),
             posts[2]
         )
-        self.assertEqual(
+        self.assertEqualModels(
             Post.objects.exclude(title__startswith='T').exclude(title='asd asd').get(),
             posts[2]
         )
@@ -248,15 +260,15 @@ class BasicQueryTests(TestCase):
     def test_negated_Q(self):
         blogs = [Blog.objects.create(title=title) for title in
                  ('blog', 'other blog', 'another blog')]
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Blog.objects.filter(title='blog') | Blog.objects.filter(~Q(title='another blog')),
             [blogs[0], blogs[1]]
         )
-        self.assertEqual(
-            blogs[2],
-            Blog.objects.get(~Q(title='blog') & ~Q(title='other blog'))
+        self.assertEqualModels(
+            Blog.objects.get(~Q(title='blog') & ~Q(title='other blog')),
+            blogs[2]
         )
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Blog.objects.filter(~Q(title='another blog')
                                 | ~Q(title='blog')
                                 | ~Q(title='aaaaa')
@@ -264,25 +276,25 @@ class BasicQueryTests(TestCase):
                                 | Q(title__in=[b.title for b in blogs])),
             blogs
         )
-        self.assertEqual(
+        self.assertEqualModels(
             Blog.objects.filter(Q(title__in=['blog', 'other blog']),
                                 ~Q(title__in=['blog'])).get(),
             blogs[1]
         )
-        self.assertEqual(
+        self.assertEqualModels(
             Blog.objects.filter().exclude(~Q(title='blog')).get(),
             blogs[0]
         )
 
     def test_exclude_plus_filter(self):
         objs = [IntegerModel.objects.create(integer=i) for i in (1, 2, 3, 4)]
-        self.assertEqual(
+        self.assertEqualModels(
             IntegerModel.objects.exclude(integer=1) \
                                 .exclude(integer=2) \
                                 .get(integer__gt=3),
             objs[3]
         )
-        self.assertEqual(
+        self.assertEqualModels(
             IntegerModel.objects.exclude(integer=1) \
                                 .exclude(integer=2) \
                                 .get(integer=3),
@@ -301,20 +313,20 @@ class BasicQueryTests(TestCase):
         obj3 = Blog.objects.create(title='2')
         obj4 = Blog.objects.create(title='3')
 
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Blog.objects.filter(title='1'),
             [obj1, obj2]
         )
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Blog.objects.filter(title='1') | Blog.objects.filter(title='2'),
             [obj1, obj2, obj3]
         )
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Blog.objects.filter(Q(title='2') | Q(title='3')),
             [obj3, obj4]
         )
 
-        self.assertEqualLists(
+        self.assertEqualModelsList(
             Blog.objects.filter(Q(Q(title__lt='4') & Q(title__gt='2'))
                                   | Q(title='1')).order_by('id'),
             [obj1, obj2, obj4]
@@ -324,7 +336,7 @@ class BasicQueryTests(TestCase):
         obj = Empty.objects.create()
         self.assertNotEqual(obj.id, None)
         self.assertNotEqual(obj.id, 'None')
-        self.assertEqual(obj, Empty.objects.get(id=obj.id))
+        self.assertEqual(ObjectId(obj.id), Empty.objects.get(id=obj.id).id)
 
     def test_values_query(self):
         blog = Blog.objects.create(title='fooblog')
@@ -332,19 +344,19 @@ class BasicQueryTests(TestCase):
         entry2 = Post.objects.create(blog=blog, title='footitle2', content='foocontent2')
         self.assertEqualLists(
             Post.objects.values(),
-            [{'blog_id' : blog.id, 'title' : u'footitle', 'id' : entry.id,
+            [{'blog_id' : ObjectId(blog.id), 'title' : u'footitle', 'id' : ObjectId(entry.id),
               'content' : u'foocontent', 'date_published' : None},
-             {'blog_id' : blog.id, 'title' : u'footitle2', 'id' : entry2.id,
+             {'blog_id' : ObjectId(blog.id), 'title' : u'footitle2', 'id' : ObjectId(entry2.id),
               'content' : u'foocontent2', 'date_published' : None}
             ]
         )
         self.assertEqualLists(
             Post.objects.values('blog'),
-            [{'blog' : blog.id}, {'blog' : blog.id}]
+            [{'blog' : ObjectId(blog.id)}, {'blog' : ObjectId(blog.id)}]
         )
         self.assertEqualLists(
             Post.objects.values_list('blog_id', 'date_published'),
-            [(blog.id, None), (blog.id, None)]
+            [(ObjectId(blog.id), None), (ObjectId(blog.id), None)]
         )
         self.assertEqualLists(
             Post.objects.values('title', 'content'),
@@ -353,20 +365,20 @@ class BasicQueryTests(TestCase):
         )
 
 
-class UpdateTests(TestCase):
+class UpdateTests(TestCase, AssertionsMixin):
     def test_update(self):
         blog1 = Blog.objects.create(title="Blog")
         blog2 = Blog.objects.create(title="Blog 2")
         entry1 = Post.objects.create(title="entry 1", blog=blog1)
 
         Post.objects.filter(pk=entry1.pk).update(blog=blog2)
-        self.assertEqualLists(Post.objects.filter(blog=blog2), [entry1])
+        self.assertEqualModelsList(Post.objects.filter(blog=blog2), [entry1])
 
         Post.objects.filter(blog=blog2).update(title="Title has been updated")
-        self.assertEqualLists(Post.objects.filter()[0].title, "Title has been updated")
+        self.assertEqual(Post.objects.filter()[0].title, "Title has been updated")
 
         Post.objects.filter(blog=blog2).update(title="Last Update Test", blog=blog1)
-        self.assertEqualLists(Post.objects.filter()[0].title, "Last Update Test")
+        self.assertEqual(Post.objects.filter()[0].title, "Last Update Test")
 
         self.assertEqual(Post.objects.filter(blog=blog1).count(), 1)
         self.assertEqual(Blog.objects.filter(title='Blog').count(), 1)
@@ -401,7 +413,7 @@ class UpdateTests(TestCase):
         self.assertRaises(AssertionError, Person.objects.update, age=F('name')+1)
 
 
-class OrderingTests(TestCase):
+class OrderingTests(TestCase, AssertionsMixin):
     def test_dates_ordering(self):
         now = datetime.datetime.now()
         before = now - datetime.timedelta(days=1)
@@ -409,9 +421,9 @@ class OrderingTests(TestCase):
         entry1 = Post.objects.create(title="entry 1", date_published=now)
         entry2 = Post.objects.create(title="entry 2", date_published=before)
 
-        self.assertEqualLists(Post.objects.order_by('-date_published'),
+        self.assertEqualModelsList(Post.objects.order_by('-date_published'),
                                  [entry1, entry2])
-        self.assertEqualLists(Post.objects.order_by('date_published'),
+        self.assertEqualModelsList(Post.objects.order_by('date_published'),
                                  [entry2, entry1])
 
 
@@ -631,12 +643,12 @@ class OrLookupsTests(TestCase):
 
         self.assertQuerysetEqual(
             Article.objects.filter(Q(headline__startswith='Hello'), Q(headline__contains='bye')).values(), [
-                {"headline": "Hello and goodbye", "id": self.a3, "pub_date": datetime.datetime(2005, 11, 29)},
+                {"headline": u"Hello and goodbye", "id": ObjectId(self.a3), "pub_date": datetime.datetime(2005, 11, 29)},
             ],
             lambda o: o,
         )
 
         self.assertEqual(
             Article.objects.filter(Q(headline__startswith='Hello')).in_bulk([self.a1, self.a2]),
-            {self.a1: Article.objects.get(pk=self.a1)}
+            {ObjectId(self.a1): Article.objects.get(pk=self.a1)}
         )

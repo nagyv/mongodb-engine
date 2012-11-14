@@ -100,13 +100,19 @@ class MongoQuery(NonrelQuery):
 
     @safe_call
     def order_by(self, ordering):
+        if isinstance(ordering, bool):
+            return self
+
         for order in ordering:
-            if order.startswith('-'):
-                order, direction = order[1:], DESCENDING
+            if not order[1]:
+                direction = DESCENDING
             else:
                 direction = ASCENDING
+
+            order = order[0].column
             if order == get_pk_column(self):
                 order = '_id'
+
             self._ordering.append((order, direction))
         return self
 
@@ -192,7 +198,7 @@ class MongoQuery(NonrelQuery):
             if lookup_type == 'isnull':
                 lookup = op_func(value)
             else:
-                lookup = op_func(self.convert_value_for_db(db_type, value))
+                lookup = op_func(self.compiler.convert_value_for_db(db_type, value))
 
             if existing is None:
                 if self._negated and not already_negated:
